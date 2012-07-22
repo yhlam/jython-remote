@@ -17,8 +17,12 @@ public class JythonServer {
 	private static JythonServer SINGLETON = null;
 	private static final String NEXT_PROMPT = ">>> ";
 	private static final String CONT_PROMPT = "... ";
+	private static final String WELCOME = InteractiveConsole.getDefaultBanner()
+			+ "\n" + NEXT_PROMPT;
 
+	private final InteractiveConsole _jython;
 	private volatile Thread _serverThread;
+	private final Object _runLock;
 
 	public static JythonServer singleton() {
 		if (SINGLETON == null) {
@@ -30,6 +34,11 @@ public class JythonServer {
 
 	private JythonServer() {
 		_serverThread = null;
+		_runLock = new Object();
+
+		System.setProperty("python.cachedir", "/home/hei/.jython-cache");
+		_jython = new InteractiveConsole();
+		_jython.exec("1");
 	}
 
 	public synchronized void startServer() {
@@ -45,7 +54,7 @@ public class JythonServer {
 				startServerImpl();
 			}
 		}, "JythonServer");
-		_serverThread.isDaemon();
+		_serverThread.setDaemon(true);
 		_serverThread.start();
 	}
 
@@ -60,46 +69,79 @@ public class JythonServer {
 	}
 
 	private void startServerImpl() {
-		System.setProperty("python.cachedir", "/home/hei/.jython-cache");
-		final InteractiveConsole jython = new InteractiveConsole();
 
 		try {
 			final ServerSocket server = new ServerSocket(JYTHON_PORT);
 			try {
 				while (true) {
 					final Socket connection = server.accept();
-					final OutputStream outputStream = connection
-							.getOutputStream();
-					jython.setOut(outputStream);
-					jython.setErr(outputStream);
-
-					final InputStream inputStream = connection.getInputStream();
-					final InputStreamReader inputStreamReader = new InputStreamReader(
-							inputStream);
-					final BufferedReader bufferedReader = new BufferedReader(
-							inputStreamReader);
-					final String line = bufferedReader.readLine();
-
-					final boolean more;
-					if (line != null) {
-						more = jython.push(line);
-					} else {
-						more = false;
-					}
-
-					final String prompt = more ? CONT_PROMPT : NEXT_PROMPT;
-					final byte[] promptBytes = prompt.getBytes();
-					outputStream.write(promptBytes);
-
-					inputStream.close();
-					outputStream.close();
-					connection.close();
+					handleConnection(connection);
 				}
 			} catch (final IOException e) {
 				server.close();
 				e.printStackTrace();
 			}
 
+		} catch (final IOException e) {
+			e.printStackTrace();
+		}
+	}
+
+	public void handleConnection(final Socket connection) {
+		new Thread(new Runnable() {
+
+			@Override
+			public void run() {
+				try {
+					final OutputStream outputStream = connection.getOutputStream();
+					final InputStream inputStream = connection.getInputStream();
+					outputStream.write(WELCOME.getBytes());
+
+					while (true) {
+						try {
+							final InputStreamReader inputStreamReader = new InputStreamReader(
+									inputStream);
+							final BufferedReader bufferedReader = new BufferedReader(
+									inputStreamReader);
+							final String line = bufferedReader.readLine();
+
+							final boolean more;
+							if (line != null) {
+								synchronized (_runLock) {
+									_jython.setOut(outputStream);
+									_jython.setErr(outputStream);
+									more = _jython.push(line);
+								}
+							} else {
+								more = false;
+							}
+
+							final String prompt = more ? CONT_PROMPT
+									: NEXT_PROMPT;
+							final byte[] promptBytes = prompt.getBytes();
+							outputStream.write(promptBytes);
+							outputStream.flush();
+						} catch (final IOException e) {
+							break;
+						}
+					}
+
+					inputStream.close();
+					outputStream.close();
+					connection.close();
+				} catch (final IOException e) {
+					e.printStackTrace();
+				}
+			}
+		}, "JythonConnection").start();
+	}
+
+	public static void main(final String[] args) {
+		JythonServer.singleton().startServer();
+		System.out.println(InteractiveConsole.getDefaultBanner());
+		System.out.println("Please any key to end...");
+		try {
+			System.in.read();
 		} catch (final IOException e) {
 			e.printStackTrace();
 		}
