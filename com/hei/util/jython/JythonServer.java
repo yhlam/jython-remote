@@ -97,6 +97,7 @@ public class JythonServer {
 					final InputStream inputStream = connection.getInputStream();
 					outputStream.write(WELCOME.getBytes());
 
+					final StringBuilder codeBuilder = new StringBuilder();
 					while (true) {
 						try {
 							final InputStreamReader inputStreamReader = new InputStreamReader(
@@ -110,7 +111,18 @@ public class JythonServer {
 								synchronized (_runLock) {
 									_jython.setOut(outputStream);
 									_jython.setErr(outputStream);
-									more = _jython.push(line);
+
+									if (codeBuilder.length() > 0) {
+										codeBuilder.append("\n");
+									}
+									codeBuilder.append(line);
+
+									final String code = codeBuilder.toString();
+									more = _jython.runsource(code, InteractiveConsole.CONSOLE_FILENAME);
+
+									if (!more) {
+										codeBuilder.setLength(0);
+									}
 								}
 							} else {
 								more = false;
