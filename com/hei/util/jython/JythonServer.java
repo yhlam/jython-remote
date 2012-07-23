@@ -1,26 +1,33 @@
 package com.hei.util.jython;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.Properties;
 
+import org.python.core.PyObject;
+import org.python.core.PySystemState;
 import org.python.util.InteractiveConsole;
+import org.python.util.InteractiveInterpreter;
 
 public class JythonServer {
 
 	public static final int JYTHON_PORT = 8991;
 
 	private static JythonServer SINGLETON = null;
+
+	private static final String STD_IN = "<stdin>";
 	private static final String NEXT_PROMPT = ">>> ";
 	private static final String CONT_PROMPT = "... ";
 	private static final String WELCOME = InteractiveConsole.getDefaultBanner()
 			+ "\n" + NEXT_PROMPT;
 
-	private final InteractiveConsole _jython;
+	private final InteractiveInterpreter _jython;
 	private volatile Thread _serverThread;
 	private final Object _runLock;
 
@@ -36,15 +43,22 @@ public class JythonServer {
 		_serverThread = null;
 		_runLock = new Object();
 
-		System.setProperty("python.cachedir", "/home/hei/.jython-cache");
-		_jython = new InteractiveConsole();
-		_jython.exec("1");
+		_jython = new InteractiveInterpreter();
+		_jython.exec("0"); // Dummy exec in order to speed up response on first command
 	}
 
 	public synchronized void startServer() {
+		startServer(null);
+	}
+
+	public synchronized void startServer(final PyObject locals) {
 		final boolean started = isStarted();
 		if (started) {
 			return;
+		}
+
+		if (locals != null) {
+			_jython.setLocals(locals);
 		}
 
 		_serverThread = new Thread(new Runnable() {
@@ -118,7 +132,7 @@ public class JythonServer {
 									codeBuilder.append(line);
 
 									final String code = codeBuilder.toString();
-									more = _jython.runsource(code, InteractiveConsole.CONSOLE_FILENAME);
+									more = _jython.runsource(code, STD_IN);
 
 									if (!more) {
 										codeBuilder.setLength(0);
@@ -149,6 +163,16 @@ public class JythonServer {
 	}
 
 	public static void main(final String[] args) {
+		final String homeDir = System.getProperty("user.home");
+		final File cacheDir = new File(homeDir, ".jython-cache");
+		final String cacheDirPath = cacheDir.getAbsolutePath();
+
+		final Properties preProperties = new Properties();
+		preProperties.setProperty("python.cachedir", cacheDirPath);
+		preProperties.setProperty("python.security.respectJavaAccessibility",
+				"false");
+		PySystemState.initialize(preProperties, null);
+
 		JythonServer.singleton().startServer();
 		System.out.println(InteractiveConsole.getDefaultBanner());
 		System.out.println("Please any key to end...");
