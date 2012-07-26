@@ -1,4 +1,4 @@
-package com.hei.util.jython;
+package com.hei.util.jython.jythonServer;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -31,7 +31,6 @@ public class JythonClient {
 				System.in));
 		new Thread(new Runnable() {
 
-			@Override
 			public void run() {
 				try {
 					final OutputStream outputStream = connection.getOutputStream();

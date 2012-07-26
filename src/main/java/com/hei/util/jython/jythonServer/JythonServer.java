@@ -1,4 +1,4 @@
-package com.hei.util.jython;
+package com.hei.util.jython.jythonServer;
 
 import java.io.BufferedReader;
 import java.io.IOException;
