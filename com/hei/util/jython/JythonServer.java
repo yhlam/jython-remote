@@ -1,17 +1,14 @@
 package com.hei.util.jython;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.Properties;
 
 import org.python.core.PyObject;
-import org.python.core.PySystemState;
 import org.python.util.InteractiveConsole;
 import org.python.util.InteractiveInterpreter;
 
@@ -172,25 +169,16 @@ public class JythonServer {
 	}
 
 	public static void main(final String[] args) {
-		final String homeDir = System.getProperty("user.home");
-		final File cacheDir = new File(homeDir, ".jython-cache");
-		final String cacheDirPath = cacheDir.getAbsolutePath();
-
-		final Properties preProperties = new Properties();
-		preProperties.setProperty("python.cachedir", cacheDirPath);
-		preProperties.setProperty("python.security.respectJavaAccessibility",
-				"false");
-		PySystemState.initialize(preProperties, null);
-
-		JythonServer.singleton().startServer();
+		final JythonServer jythonServer = JythonServer.singleton();
+		jythonServer.startServer();
 		System.out.println(InteractiveConsole.getDefaultBanner());
 		System.out.println("Please any key to end...");
 		try {
 			System.in.read();
-			JythonServer.singleton().stopServer();
 		} catch (final IOException e) {
 			e.printStackTrace();
 		}
+		jythonServer.stopServer();
 	}
 
 }
