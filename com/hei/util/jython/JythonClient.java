@@ -21,7 +21,7 @@ public class JythonClient {
 		final Socket connection;
 		try {
 			connection = new Socket(InetAddress.getLocalHost(),
-					JythonServer.JYTHON_PORT);
+					JythonServer.DEFAULT_PORT);
 		} catch (final IOException e) {
 			System.err.println("Cannot reach the server");
 			return;

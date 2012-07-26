@@ -17,7 +17,7 @@ import org.python.util.InteractiveInterpreter;
 
 public class JythonServer {
 
-	public static final int JYTHON_PORT = 8991;
+	public static final int DEFAULT_PORT = 5518;
 
 	private static JythonServer SINGLETON = null;
 
@@ -52,6 +52,14 @@ public class JythonServer {
 	}
 
 	public synchronized void startServer(final PyObject locals) {
+		startServer(locals, DEFAULT_PORT);
+	}
+
+	public synchronized void startServer(final int port) {
+		startServer(null, DEFAULT_PORT);
+	}
+
+	public synchronized void startServer(final PyObject locals, final int port) {
 		final boolean started = isStarted();
 		if (started) {
 			return;
@@ -65,7 +73,7 @@ public class JythonServer {
 
 			@Override
 			public void run() {
-				startServerImpl();
+				startServerImpl(port);
 			}
 		}, "JythonServer");
 		_serverThread.setDaemon(true);
@@ -78,14 +86,15 @@ public class JythonServer {
 
 	public synchronized void stopServer() {
 		if (_serverThread != null) {
+			_jython.cleanup();
 			_serverThread.interrupt();
 		}
 	}
 
-	private void startServerImpl() {
+	private void startServerImpl(final int port) {
 
 		try {
-			final ServerSocket server = new ServerSocket(JYTHON_PORT);
+			final ServerSocket server = new ServerSocket(port);
 			try {
 				while (true) {
 					final Socket connection = server.accept();
@@ -178,6 +187,7 @@ public class JythonServer {
 		System.out.println("Please any key to end...");
 		try {
 			System.in.read();
+			JythonServer.singleton().stopServer();
 		} catch (final IOException e) {
 			e.printStackTrace();
 		}
