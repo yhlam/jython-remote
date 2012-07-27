@@ -1,4 +1,4 @@
-package com.hei.util.jython.jythonServer;
+package com.hei.util.jythonRemote.client;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -10,6 +10,8 @@ import java.net.Socket;
 
 public class JythonRemoteClient {
 
+	public static final int DEFAULT_PORT = 5518;
+	
 	/**
 	 * @param args
 	 */
@@ -20,8 +22,7 @@ public class JythonRemoteClient {
 	private static void startClient() {
 		final Socket connection;
 		try {
-			connection = new Socket(InetAddress.getLocalHost(),
-					JythonRemoteServer.DEFAULT_PORT);
+			connection = new Socket(InetAddress.getLocalHost(), DEFAULT_PORT);
 		} catch (final IOException e) {
 			System.err.println("Cannot reach the server");
 			return;

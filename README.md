@@ -22,7 +22,7 @@ To build JythonRemote through Maven:
 
     mvn install
 
-You will find jython-remote.jar under target directory
+jython-remote-server.jar and jython-remote-client.jar will be packaged under target directory
 
 Usage:
 ------
@@ -47,4 +47,4 @@ You can also give a local variable maps to JythonRemote through calling
 
 There is a command line implementation of JythonRemote client, you can start it with
 
-    java -cp jython-remote.jar com.hei.util.jython.JythonRemote.JythonRemoteClient
+    java -jar jython-remote-client.jar

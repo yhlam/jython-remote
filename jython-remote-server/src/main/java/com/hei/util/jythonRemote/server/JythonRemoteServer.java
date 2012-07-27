@@ -1,4 +1,4 @@
-package com.hei.util.jython.jythonServer;
+package com.hei.util.jythonRemote.server;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -68,7 +68,6 @@ public class JythonRemoteServer {
 
 		_serverThread = new Thread(new Runnable() {
 
-			@Override
 			public void run() {
 				startServerImpl(port);
 			}
@@ -110,7 +109,6 @@ public class JythonRemoteServer {
 	public void handleConnection(final Socket connection) {
 		new Thread(new Runnable() {
 
-			@Override
 			public void run() {
 				try {
 					final OutputStream outputStream = connection.getOutputStream();
