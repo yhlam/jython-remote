@@ -47,4 +47,4 @@ You can also give a local variable maps to JythonRemote through calling
 
 There is a command line implementation of JythonRemote client, you can start it with
 
-    java -jar jython-remote-client.jar
+    java -jar jython-remote-client-jar-with-dependencies.jar
