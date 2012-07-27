@@ -8,7 +8,7 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.Socket;
 
-public class JythonClient {
+public class JythonRemoteClient {
 
 	/**
 	 * @param args
@@ -21,7 +21,7 @@ public class JythonClient {
 		final Socket connection;
 		try {
 			connection = new Socket(InetAddress.getLocalHost(),
-					JythonServer.DEFAULT_PORT);
+					JythonRemoteServer.DEFAULT_PORT);
 		} catch (final IOException e) {
 			System.err.println("Cannot reach the server");
 			return;

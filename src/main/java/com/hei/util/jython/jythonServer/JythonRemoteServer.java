@@ -12,11 +12,11 @@ import org.python.core.PyObject;
 import org.python.util.InteractiveConsole;
 import org.python.util.InteractiveInterpreter;
 
-public class JythonServer {
+public class JythonRemoteServer {
 
 	public static final int DEFAULT_PORT = 5518;
 
-	private static JythonServer SINGLETON = null;
+	private static JythonRemoteServer SINGLETON = null;
 
 	private static final String STD_IN = "<stdin>";
 	private static final String NEXT_PROMPT = ">>> ";
@@ -28,15 +28,15 @@ public class JythonServer {
 	private volatile Thread _serverThread;
 	private final Object _runLock;
 
-	public static JythonServer singleton() {
+	public static JythonRemoteServer singleton() {
 		if (SINGLETON == null) {
-			SINGLETON = new JythonServer();
+			SINGLETON = new JythonRemoteServer();
 		}
 
 		return SINGLETON;
 	}
 
-	private JythonServer() {
+	private JythonRemoteServer() {
 		_serverThread = null;
 		_runLock = new Object();
 
@@ -169,7 +169,7 @@ public class JythonServer {
 	}
 
 	public static void main(final String[] args) {
-		final JythonServer jythonServer = JythonServer.singleton();
+		final JythonRemoteServer jythonServer = JythonRemoteServer.singleton();
 		jythonServer.startServer();
 		System.out.println(InteractiveConsole.getDefaultBanner());
 		System.out.println("Please any key to end...");

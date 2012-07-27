@@ -1,50 +1,50 @@
-JythonServer
+JythonRemote
 ============
 
-What is JythonServer?
+What is JythonRemote?
 ---------------------
 
-JythonServer is plugin that provide remote access to running Java application through Jython.
+JythonRemote is plugin that provide remote access to running Java application through Jython.
 
-For instance, JythonServer can help you to alter value of static variable during runtime, such that you can change the behavior of application without restarting it.
+For instance, JythonRemote can help you to alter value of static variable during runtime, such that you can change the behavior of application without restarting it.
 
 Requirements:
 -------------
 
-Maven for building JythonServer.
+Maven for building JythonRemote.
 
-JythonServer depends on jython-standalone, Maven should grap the jar automatically.
+JythonRemote depends on jython-standalone, Maven should grap the jar automatically.
 
 Installation:
 -------------
 
-To build JythonServer through Maven:
+To build JythonRemote through Maven:
 
     mvn install
 
-You will find jython-server.jar under target directory
+You will find jython-remote.jar under target directory
 
 Usage:
 ------
 
 ### Intergation to your application
 
-To intergate JythonServer to your application, call
+To intergate JythonRemote to your application, call
 
-    JythonServer.singleton().startServer()
+    JythonRemoteServer.singleton().startServer()
 
 when your application is started.
 
 The default port of the server is 5518. You may change it by providing the port number you want when you call startServer(). For example,
 
-    JythonServer.singleton().startServer(1234)
+    JythonRemoteServer.singleton().startServer(1234)
 
-You can also give a local variable maps to JythonServer through calling
+You can also give a local variable maps to JythonRemote through calling
 
-    JythonServer.singleton().startServer(locals)
+    JythonRemoteServer.singleton().startServer(locals)
 
-### Remote accessing JythonServer
+### Remote accessing JythonRemote
 
-There is a command line implementation of JythonServer client, you can start it with
+There is a command line implementation of JythonRemote client, you can start it with
 
-    java -cp jython-server.jar com.hei.util.jython.jythonServer.JythonClient
+    java -cp jython-remote.jar com.hei.util.jython.JythonRemote.JythonRemoteClient
