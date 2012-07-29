@@ -1,28 +1,30 @@
 package com.hei.util.jythonRemote.server;
 
-import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 
 import org.python.core.PyObject;
+import org.python.core.PySystemState;
 import org.python.util.InteractiveConsole;
 import org.python.util.InteractiveInterpreter;
 
+import com.hei.util.jythonRemote.api.JythonRemoteUtil;
+import com.hei.util.jythonRemote.api.JythonRemoteUtil.Prompt;
+import com.hei.util.jythonRemote.api.message.EvaluationResponse;
+import com.hei.util.jythonRemote.api.message.EvaluationRequest;
+import com.hei.util.jythonRemote.api.message.ConnectionResponse;
+import com.hei.util.jythonRemote.api.message.JythonRemoteMessage;
+import com.hei.util.jythonRemote.api.message.JythonRemoteMessage.MessageType;
+import com.hei.util.jythonRemote.api.message.JythonRemoteMessageReader;
+
 public class JythonRemoteServer {
 
-	public static final int DEFAULT_PORT = 5518;
-
-	private static JythonRemoteServer SINGLETON = null;
-
 	private static final String STD_IN = "<stdin>";
-	private static final String NEXT_PROMPT = ">>> ";
-	private static final String CONT_PROMPT = "... ";
-	private static final String WELCOME = InteractiveConsole.getDefaultBanner()
-			+ "\n" + NEXT_PROMPT;
+	private static JythonRemoteServer SINGLETON = null;
 
 	private final InteractiveInterpreter _jython;
 	private volatile Thread _serverThread;
@@ -49,11 +51,11 @@ public class JythonRemoteServer {
 	}
 
 	public synchronized void startServer(final PyObject locals) {
-		startServer(locals, DEFAULT_PORT);
+		startServer(locals, JythonRemoteUtil.DEFAULT_PORT);
 	}
 
 	public synchronized void startServer(final int port) {
-		startServer(null, DEFAULT_PORT);
+		startServer(null, JythonRemoteUtil.DEFAULT_PORT);
 	}
 
 	public synchronized void startServer(final PyObject locals, final int port) {
@@ -113,43 +115,60 @@ public class JythonRemoteServer {
 				try {
 					final OutputStream outputStream = connection.getOutputStream();
 					final InputStream inputStream = connection.getInputStream();
-					outputStream.write(WELCOME.getBytes());
+					final ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+					final String version = PySystemState.version.toString();
+					final String platform = PySystemState.platform.toString();
+					final ConnectionResponse connectionResponse = new ConnectionResponse(
+							version, platform);
+					final byte[] responseBytes = connectionResponse.serialize();
+					outputStream.write(responseBytes);
+					outputStream.flush();
+
+					final JythonRemoteMessageReader msgReader = new JythonRemoteMessageReader(
+							inputStream);
 
 					final StringBuilder codeBuilder = new StringBuilder();
 					while (true) {
 						try {
-							final InputStreamReader inputStreamReader = new InputStreamReader(
-									inputStream);
-							final BufferedReader bufferedReader = new BufferedReader(
-									inputStreamReader);
-							final String line = bufferedReader.readLine();
+							JythonRemoteMessage message;
+							MessageType type;
+							do {
+								message = msgReader.nextMessage();
+								type = message.getMsgType();
+							} while (type != MessageType.EvaluationRequest);
+
+							final EvaluationRequest cmdMsg = (EvaluationRequest) message;
+							final String line = cmdMsg.getLine();
 
 							final boolean more;
-							if (line != null) {
-								synchronized (_runLock) {
-									_jython.setOut(outputStream);
-									_jython.setErr(outputStream);
+							synchronized (_runLock) {
+								_jython.setOut(out);
+								_jython.setErr(out);
 
-									if (codeBuilder.length() > 0) {
-										codeBuilder.append("\n");
-									}
-									codeBuilder.append(line);
-
-									final String code = codeBuilder.toString();
-									more = _jython.runsource(code, STD_IN);
-
-									if (!more) {
-										codeBuilder.setLength(0);
-									}
+								if (codeBuilder.length() > 0) {
+									codeBuilder.append("\n");
 								}
-							} else {
-								more = false;
+								codeBuilder.append(line);
+
+								final String code = codeBuilder.toString();
+								more = _jython.runsource(code, STD_IN);
+
+								if (!more) {
+									codeBuilder.setLength(0);
+								}
 							}
 
-							final String prompt = more ? CONT_PROMPT
-									: NEXT_PROMPT;
-							final byte[] promptBytes = prompt.getBytes();
-							outputStream.write(promptBytes);
+							final Prompt prompt = more ? Prompt.Continue
+									: Prompt.NewLine;
+
+							final String response = out.toString();
+							out.reset();
+
+							final EvaluationResponse commandResponse = new EvaluationResponse(
+									response, prompt);
+							final byte[] msgBytes = commandResponse.serialize();
+							outputStream.write(msgBytes);
 							outputStream.flush();
 						} catch (final IOException e) {
 							break;

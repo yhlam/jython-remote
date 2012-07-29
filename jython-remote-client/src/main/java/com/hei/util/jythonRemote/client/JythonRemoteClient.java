@@ -1,13 +1,17 @@
 package com.hei.util.jythonRemote.client;
 
-import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.UnknownHostException;
+
+import jline.ConsoleReader;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -18,9 +22,16 @@ import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.PosixParser;
 
-public class JythonRemoteClient {
+import com.hei.util.jythonRemote.api.JythonRemoteUtil;
+import com.hei.util.jythonRemote.api.JythonRemoteUtil.Prompt;
+import com.hei.util.jythonRemote.api.message.EvaluationResponse;
+import com.hei.util.jythonRemote.api.message.EvaluationRequest;
+import com.hei.util.jythonRemote.api.message.ConnectionResponse;
+import com.hei.util.jythonRemote.api.message.JythonRemoteMessage;
+import com.hei.util.jythonRemote.api.message.JythonRemoteMessage.MessageType;
+import com.hei.util.jythonRemote.api.message.JythonRemoteMessageReader;
 
-	public static final int DEFAULT_PORT = 5518;
+public class JythonRemoteClient {
 
 	/**
 	 * @param args
@@ -34,7 +45,8 @@ public class JythonRemoteClient {
 
 		OptionBuilder.withArgName("port");
 		OptionBuilder.hasArg();
-		OptionBuilder.withDescription("Server Port (default: 5518)");
+		OptionBuilder.withDescription("Server Port (default: "
+				+ JythonRemoteUtil.DEFAULT_PORT + ")");
 		OptionBuilder.withLongOpt("port");
 		final Option portOpt = OptionBuilder.create('p');
 
@@ -58,7 +70,7 @@ public class JythonRemoteClient {
 
 			final String host = line.getOptionValue('i');
 
-			int port = DEFAULT_PORT;
+			int port = JythonRemoteUtil.DEFAULT_PORT;
 			if (line.hasOption('p')) {
 				final String portStr = line.getOptionValue("port");
 				try {
@@ -77,6 +89,8 @@ public class JythonRemoteClient {
 	}
 
 	private static void startClient(final String ip, final int port) {
+		final String ipStr = ip == null ? "localhost" : ip;
+
 		final Socket connection;
 		try {
 			final InetAddress addr;
@@ -93,53 +107,166 @@ public class JythonRemoteClient {
 
 			connection = new Socket(addr, port);
 		} catch (final IOException e) {
-			final String ipStr = ip == null ? "localhost" : ip;
 			System.err.println("Cannot reach the server " + ipStr + ":" + port);
 			return;
 		}
 
-		final BufferedReader in = new BufferedReader(new InputStreamReader(
-				System.in));
-		new Thread(new Runnable() {
-
-			public void run() {
-				try {
-					final OutputStream outputStream = connection.getOutputStream();
-					String line;
-					while ((line = in.readLine()) != null) {
-						final String code = line + "\n";
-						try {
-							outputStream.write(code.getBytes());
-							outputStream.flush();
-						} catch (final IOException e) {
-							System.err.println("Cannot reach the server");
-						}
-					}
-
-					outputStream.close();
-				} catch (final IOException e) {
-					e.printStackTrace();
-				}
+		final ConsoleReader reader;
+		try {
+			final OutputStreamWriter out = new OutputStreamWriter(System.out);
+			final InputStream bindings = getBindings();
+			reader = new ConsoleReader(System.in, out, bindings);
+		} catch (final IOException e) {
+			System.err.println("Cannot start the console");
+			try {
+				connection.close();
+			} catch (final IOException ex) {
 			}
-		}, "StdInToSocketIn").start();
+			return;
+		}
+
+		final InputStream inputStream;
+		final OutputStream outputStream;
+		try {
+			inputStream = connection.getInputStream();
+			outputStream = connection.getOutputStream();
+		} catch (final IOException e1) {
+			System.err.println("Cannot reach the server " + ipStr + ":" + port);
+			try {
+				connection.close();
+			} catch (final IOException e) {
+			}
+			return;
+		}
+
+		final JythonRemoteMessageReader msgReader = new JythonRemoteMessageReader(
+				inputStream);
+
+		ConnectionResponse connMsg;
+		try {
+			while (true) {
+				final JythonRemoteMessage message = msgReader.nextMessage();
+				final MessageType msgType = message.getMsgType();
+				if (msgType != MessageType.ConnectionResponse) {
+					continue;
+				}
+
+				connMsg = (ConnectionResponse) message;
+				break;
+			}
+		} catch (final IOException e) {
+			System.err.println("Cannot reach the server " + ipStr + ":" + port);
+			try {
+				connection.close();
+			} catch (final IOException ex) {
+			}
+			return;
+		}
+
+		final String version = connMsg.getVersion();
+		final String platform = connMsg.getPlatform();
+
+		System.out.println("Connected to " + ipStr + ":" + port);
+		System.out.println("Jython " + version + " on " + platform);
+
+		Prompt prompt = Prompt.NewLine;
+		while (true) {
+			String promptStr;
+			switch (prompt) {
+			case NewLine:
+				promptStr = ">>> ";
+				break;
+			case Continue:
+				promptStr = "... ";
+				break;
+			default:
+				System.err.println("Unexpected prompt type: " + prompt);
+				try {
+					connection.close();
+				} catch (final IOException e) {
+				}
+				return;
+			}
+
+			final String line;
+			try {
+				line = reader.readLine(promptStr);
+			} catch (final IOException e) {
+				System.err.println("Cannot read the console");
+				try {
+					connection.close();
+				} catch (final IOException ex) {
+				}
+				return;
+			}
+
+			final EvaluationRequest evaluationRequest = new EvaluationRequest(line);
+			final byte[] submitBytes = evaluationRequest.serialize();
+			try {
+				outputStream.write(submitBytes);
+				outputStream.flush();
+			} catch (final IOException e) {
+				System.err.println("Cannot reach the server " + ipStr + ":"
+						+ port);
+				try {
+					connection.close();
+				} catch (final IOException ex) {
+				}
+				return;
+			}
+
+			try {
+				JythonRemoteMessage message;
+				MessageType msgType;
+				do {
+					message = msgReader.nextMessage();
+					msgType = message.getMsgType();
+				} while (msgType != MessageType.EvaluationResponse);
+
+				final EvaluationResponse castedMsg = (EvaluationResponse) message;
+				final String response = castedMsg.getResponse();
+				System.out.print(response);
+				prompt = castedMsg.getPrompt();
+			} catch (final IOException e) {
+				System.err.println("Cannot reach the server " + ipStr + ":"
+						+ port);
+				try {
+					connection.close();
+				} catch (final IOException ex) {
+				}
+				return;
+			}
+		}
+	}
+
+	/**
+	 * Return the JLine bindings file.
+	 * 
+	 * This handles loading the user's custom keybindings (normally JLine does)
+	 * so it can fallback to Jython's (which disable tab completition) when the
+	 * user's are not available.
+	 * 
+	 * @return an InputStream of the JLine bindings file.
+	 */
+	protected static InputStream getBindings() {
+		final String userBindings = new File(System.getProperty("user.home"),
+				".jlinebindings.properties").getAbsolutePath();
+		final File bindingsFile = new File(System.getProperty(
+				"jline.keybindings", userBindings));
 
 		try {
-			final InputStream inputStream = connection.getInputStream();
-			final InputStreamReader inputStreamReader = new InputStreamReader(
-					inputStream);
-			final BufferedReader bufferedReader = new BufferedReader(
-					inputStreamReader);
-			final char[] buffer = new char[1024];
-			int read;
-			while ((read = bufferedReader.read(buffer)) > 0) {
-				final char[] str = new char[read];
-				System.arraycopy(buffer, 0, str, 0, read);
-				System.out.print(str);
+			if (bindingsFile.isFile()) {
+				try {
+					return new FileInputStream(bindingsFile);
+				} catch (final FileNotFoundException fnfe) {
+					// Shouldn't really ever happen
+					fnfe.printStackTrace();
+				}
 			}
-
-			connection.close();
-		} catch (final IOException e) {
-			System.out.println("Connection closed");
+		} catch (final SecurityException se) {
+			// continue
 		}
+		return JythonRemoteClient.class
+				.getResourceAsStream("jline-keybindings.properties");
 	}
 }
