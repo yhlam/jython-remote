@@ -26,7 +26,7 @@ public class JythonRemoteMessageReader {
 		while ((read = _in.read(_buffer, _offset, _buffer.length - _offset)) > 0) {
 			try {
 				final DeserializationResult result = JythonRemoteMessage
-						.deserialize(_buffer, 0, read);
+						.deserialize(_buffer, 0, _offset + read);
 				final byte[] remaining = result.getRemaining();
 				System.arraycopy(remaining, 0, _buffer, 0, remaining.length);
 				_offset = remaining.length;
