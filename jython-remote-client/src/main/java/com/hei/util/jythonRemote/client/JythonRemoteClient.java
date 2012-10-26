@@ -11,6 +11,11 @@ import java.net.InetAddress;
 import java.net.Socket;
 import java.net.UnknownHostException;
 
+import javax.net.SocketFactory;
+import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+
 import jline.ConsoleReader;
 
 import org.apache.commons.cli.CommandLine;
@@ -24,9 +29,9 @@ import org.apache.commons.cli.PosixParser;
 
 import com.hei.util.jythonRemote.api.JythonRemoteUtil;
 import com.hei.util.jythonRemote.api.JythonRemoteUtil.Prompt;
-import com.hei.util.jythonRemote.api.message.EvaluationResponse;
-import com.hei.util.jythonRemote.api.message.EvaluationRequest;
 import com.hei.util.jythonRemote.api.message.ConnectionResponse;
+import com.hei.util.jythonRemote.api.message.EvaluationRequest;
+import com.hei.util.jythonRemote.api.message.EvaluationResponse;
 import com.hei.util.jythonRemote.api.message.JythonRemoteMessage;
 import com.hei.util.jythonRemote.api.message.JythonRemoteMessage.MessageType;
 import com.hei.util.jythonRemote.api.message.JythonRemoteMessageReader;
@@ -45,17 +50,18 @@ public class JythonRemoteClient {
 
 		OptionBuilder.withArgName("port");
 		OptionBuilder.hasArg();
-		OptionBuilder.withDescription("Server Port (default: "
-				+ JythonRemoteUtil.DEFAULT_PORT + ")");
+		OptionBuilder.withDescription("Server Port (default: " + JythonRemoteUtil.DEFAULT_PORT + ")");
 		OptionBuilder.withLongOpt("port");
 		final Option portOpt = OptionBuilder.create('p');
 
-		final Option helpOpt = new Option("h", "help", false,
-				"print this message");
+		final Option anonOpt = new Option("a", "anonymous", false, "Enable anonymous cipher suites");
+
+		final Option helpOpt = new Option("h", "help", false, "print this message");
 
 		final Options options = new Options();
 		options.addOption(hostOpt);
 		options.addOption(portOpt);
+		options.addOption(anonOpt);
 		options.addOption(helpOpt);
 
 		final CommandLineParser parser = new PosixParser();
@@ -81,15 +87,19 @@ public class JythonRemoteClient {
 				}
 			}
 
-			startClient(host, port);
+			final boolean anon = line.hasOption('a');
+
+			startClient(host, port, anon);
 		} catch (final ParseException e) {
 			final HelpFormatter formatter = new HelpFormatter();
 			formatter.printHelp("jython-remote-client", options, true);
 		}
 	}
 
-	private static void startClient(final String ip, final int port) {
+	private static void startClient(final String ip, final int port, final boolean anon) {
 		final String ipStr = ip == null ? "localhost" : ip;
+
+		final SocketFactory socketFactory = SSLSocketFactory.getDefault();
 
 		final Socket connection;
 		try {
@@ -105,7 +115,14 @@ public class JythonRemoteClient {
 				addr = InetAddress.getLocalHost();
 			}
 
-			connection = new Socket(addr, port);
+			connection = socketFactory.createSocket(addr, port);
+
+			if (anon) {
+				System.out.println("Warining: No keystore is provided. Anonymous cipher suites are enabled, they are vulnerable to \"man-in-the-middle\" attacks.");
+				final SSLSocket sslConn = (SSLSocket) connection;
+				final String[] supportedCipherSuites = sslConn.getSupportedCipherSuites();
+				sslConn.setEnabledCipherSuites(supportedCipherSuites);
+			}
 		} catch (final IOException e) {
 			System.err.println("Cannot reach the server " + ipStr + ":" + port);
 			return;
@@ -130,6 +147,10 @@ public class JythonRemoteClient {
 		try {
 			inputStream = connection.getInputStream();
 			outputStream = connection.getOutputStream();
+		} catch (final SSLException e) {
+			final String errMsg = e.getMessage();
+			System.err.println(errMsg);
+			return;
 		} catch (final IOException e1) {
 			System.err.println("Cannot reach the server " + ipStr + ":" + port);
 			try {
@@ -139,8 +160,7 @@ public class JythonRemoteClient {
 			return;
 		}
 
-		final JythonRemoteMessageReader msgReader = new JythonRemoteMessageReader(
-				inputStream);
+		final JythonRemoteMessageReader msgReader = new JythonRemoteMessageReader(inputStream);
 
 		ConnectionResponse connMsg;
 		try {
@@ -206,8 +226,7 @@ public class JythonRemoteClient {
 				outputStream.write(submitBytes);
 				outputStream.flush();
 			} catch (final IOException e) {
-				System.err.println("Cannot reach the server " + ipStr + ":"
-						+ port);
+				System.err.println("Cannot reach the server " + ipStr + ":" + port);
 				try {
 					connection.close();
 				} catch (final IOException ex) {
@@ -228,8 +247,7 @@ public class JythonRemoteClient {
 				System.out.print(response);
 				prompt = castedMsg.getPrompt();
 			} catch (final IOException e) {
-				System.err.println("Cannot reach the server " + ipStr + ":"
-						+ port);
+				System.err.println("Cannot reach the server " + ipStr + ":" + port);
 				try {
 					connection.close();
 				} catch (final IOException ex) {
@@ -249,10 +267,8 @@ public class JythonRemoteClient {
 	 * @return an InputStream of the JLine bindings file.
 	 */
 	protected static InputStream getBindings() {
-		final String userBindings = new File(System.getProperty("user.home"),
-				".jlinebindings.properties").getAbsolutePath();
-		final File bindingsFile = new File(System.getProperty(
-				"jline.keybindings", userBindings));
+		final String userBindings = new File(System.getProperty("user.home"), ".jlinebindings.properties").getAbsolutePath();
+		final File bindingsFile = new File(System.getProperty("jline.keybindings", userBindings));
 
 		try {
 			if (bindingsFile.isFile()) {
@@ -266,7 +282,6 @@ public class JythonRemoteClient {
 		} catch (final SecurityException se) {
 			// continue
 		}
-		return JythonRemoteClient.class
-				.getResourceAsStream("jline-keybindings.properties");
+		return JythonRemoteClient.class.getResourceAsStream("jline-keybindings.properties");
 	}
 }

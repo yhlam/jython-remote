@@ -7,6 +7,10 @@ import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 
+import javax.net.ServerSocketFactory;
+import javax.net.ssl.SSLServerSocketFactory;
+import javax.net.ssl.SSLSocket;
+
 import org.python.core.PyObject;
 import org.python.core.PySystemState;
 import org.python.util.InteractiveConsole;
@@ -14,15 +18,14 @@ import org.python.util.InteractiveInterpreter;
 
 import com.hei.util.jythonRemote.api.JythonRemoteUtil;
 import com.hei.util.jythonRemote.api.JythonRemoteUtil.Prompt;
-import com.hei.util.jythonRemote.api.message.EvaluationResponse;
-import com.hei.util.jythonRemote.api.message.EvaluationRequest;
 import com.hei.util.jythonRemote.api.message.ConnectionResponse;
+import com.hei.util.jythonRemote.api.message.EvaluationRequest;
+import com.hei.util.jythonRemote.api.message.EvaluationResponse;
 import com.hei.util.jythonRemote.api.message.JythonRemoteMessage;
 import com.hei.util.jythonRemote.api.message.JythonRemoteMessage.MessageType;
 import com.hei.util.jythonRemote.api.message.JythonRemoteMessageReader;
 
 public class JythonRemoteServer {
-
 	private static final String STD_IN = "<stdin>";
 	private static JythonRemoteServer SINGLETON = null;
 
@@ -43,7 +46,9 @@ public class JythonRemoteServer {
 		_runLock = new Object();
 
 		_jython = new InteractiveInterpreter();
-		_jython.exec("0"); // Dummy exec in order to speed up response on first command
+
+		// Dummy exec in order to speed up response on first command
+		_jython.exec("0");
 	}
 
 	public synchronized void startServer() {
@@ -90,12 +95,22 @@ public class JythonRemoteServer {
 	}
 
 	private void startServerImpl(final int port) {
+		final ServerSocketFactory serverSocketFactory = SSLServerSocketFactory.getDefault();
 
 		try {
-			final ServerSocket server = new ServerSocket(port);
+			final ServerSocket server = serverSocketFactory.createServerSocket(port);
 			try {
 				while (true) {
 					final Socket connection = server.accept();
+
+					// Need to re-check the property in case it is set during runtime
+					final boolean noKeyStore = System.getProperty("javax.net.ssl.keyStore") == null;
+					if (noKeyStore) {
+						final SSLSocket sslConn = (SSLSocket) connection;
+						final String[] supportedCipherSuites = sslConn.getSupportedCipherSuites();
+						sslConn.setEnabledCipherSuites(supportedCipherSuites);
+					}
+
 					handleConnection(connection);
 				}
 			} catch (final IOException e) {
@@ -119,14 +134,12 @@ public class JythonRemoteServer {
 
 					final String version = PySystemState.version.toString();
 					final String platform = PySystemState.platform.toString();
-					final ConnectionResponse connectionResponse = new ConnectionResponse(
-							version, platform);
+					final ConnectionResponse connectionResponse = new ConnectionResponse(version, platform);
 					final byte[] responseBytes = connectionResponse.serialize();
 					outputStream.write(responseBytes);
 					outputStream.flush();
 
-					final JythonRemoteMessageReader msgReader = new JythonRemoteMessageReader(
-							inputStream);
+					final JythonRemoteMessageReader msgReader = new JythonRemoteMessageReader(inputStream);
 
 					final StringBuilder codeBuilder = new StringBuilder();
 					while (true) {
@@ -159,14 +172,12 @@ public class JythonRemoteServer {
 								}
 							}
 
-							final Prompt prompt = more ? Prompt.Continue
-									: Prompt.NewLine;
+							final Prompt prompt = more ? Prompt.Continue : Prompt.NewLine;
 
 							final String response = out.toString();
 							out.reset();
 
-							final EvaluationResponse commandResponse = new EvaluationResponse(
-									response, prompt);
+							final EvaluationResponse commandResponse = new EvaluationResponse(response, prompt);
 							final byte[] msgBytes = commandResponse.serialize();
 							outputStream.write(msgBytes);
 							outputStream.flush();
@@ -189,6 +200,12 @@ public class JythonRemoteServer {
 		final JythonRemoteServer jythonServer = JythonRemoteServer.singleton();
 		jythonServer.startServer();
 		System.out.println(InteractiveConsole.getDefaultBanner());
+		final boolean noKeyStore = System.getProperty("javax.net.ssl.keyStore") == null;
+		if (noKeyStore) {
+			System.out.println("Warining: No keystore is provided. "
+					+ "Anonymous cipher suites are enabled, they are vulnerable to \"man-in-the-middle\" attacks. "
+					+ "Please specify the keystore in the javax.net.ssl.keyStore system property");
+		}
 		System.out.println("Please any key to end...");
 		try {
 			System.in.read();
