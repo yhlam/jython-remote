@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 
@@ -75,6 +76,7 @@ public class JythonRemoteServer {
 
 		_serverThread = new Thread(new Runnable() {
 
+			@Override
 			public void run() {
 				startServerImpl(port);
 			}
@@ -126,7 +128,11 @@ public class JythonRemoteServer {
 	public void handleConnection(final Socket connection) {
 		new Thread(new Runnable() {
 
+			@Override
 			public void run() {
+				final InetAddress clientAddr = connection.getInetAddress();
+				System.out.println("Connected to " + clientAddr.getHostAddress());
+
 				try {
 					final OutputStream outputStream = connection.getOutputStream();
 					final InputStream inputStream = connection.getInputStream();
@@ -135,9 +141,7 @@ public class JythonRemoteServer {
 					final String version = PySystemState.version.toString();
 					final String platform = PySystemState.platform.toString();
 					final ConnectionResponse connectionResponse = new ConnectionResponse(version, platform);
-					final byte[] responseBytes = connectionResponse.serialize();
-					outputStream.write(responseBytes);
-					outputStream.flush();
+					sendMessage(outputStream, connectionResponse);
 
 					final JythonRemoteMessageReader msgReader = new JythonRemoteMessageReader(inputStream);
 
@@ -177,10 +181,8 @@ public class JythonRemoteServer {
 							final String response = out.toString();
 							out.reset();
 
-							final EvaluationResponse commandResponse = new EvaluationResponse(response, prompt);
-							final byte[] msgBytes = commandResponse.serialize();
-							outputStream.write(msgBytes);
-							outputStream.flush();
+							final EvaluationResponse evalResponese = new EvaluationResponse(response, prompt);
+							sendMessage(outputStream, evalResponese);
 						} catch (final IOException e) {
 							break;
 						}
@@ -193,7 +195,14 @@ public class JythonRemoteServer {
 					e.printStackTrace();
 				}
 			}
+
 		}, "JythonConnection").start();
+	}
+
+	private void sendMessage(final OutputStream outputStream, final JythonRemoteMessage message) throws IOException {
+		final byte[] bytes = message.serialize();
+		outputStream.write(bytes);
+		outputStream.flush();
 	}
 
 	public static void main(final String[] args) {
@@ -202,8 +211,7 @@ public class JythonRemoteServer {
 		System.out.println(InteractiveConsole.getDefaultBanner());
 		final boolean noKeyStore = System.getProperty("javax.net.ssl.keyStore") == null;
 		if (noKeyStore) {
-			System.out.println("Warining: No keystore is provided. "
-					+ "Anonymous cipher suites are enabled, they are vulnerable to \"man-in-the-middle\" attacks. "
+			System.out.println("Warining: No keystore is provided. Anonymous cipher suites are enabled, they are vulnerable to \"man-in-the-middle\" attacks. "
 					+ "Please specify the keystore in the javax.net.ssl.keyStore system property");
 		}
 		System.out.println("Please any key to end...");

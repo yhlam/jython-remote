@@ -99,30 +99,12 @@ public class JythonRemoteClient {
 	private static void startClient(final String ip, final int port, final boolean anon) {
 		final String ipStr = ip == null ? "localhost" : ip;
 
-		final SocketFactory socketFactory = SSLSocketFactory.getDefault();
-
 		final Socket connection;
 		try {
-			final InetAddress addr;
-			if (ip != null) {
-				try {
-					addr = InetAddress.getByName(ip);
-				} catch (final UnknownHostException e) {
-					System.err.println("Unknown host " + ip);
-					return;
-				}
-			} else {
-				addr = InetAddress.getLocalHost();
-			}
-
-			connection = socketFactory.createSocket(addr, port);
-
-			if (anon) {
-				System.out.println("Warining: No keystore is provided. Anonymous cipher suites are enabled, they are vulnerable to \"man-in-the-middle\" attacks.");
-				final SSLSocket sslConn = (SSLSocket) connection;
-				final String[] supportedCipherSuites = sslConn.getSupportedCipherSuites();
-				sslConn.setEnabledCipherSuites(supportedCipherSuites);
-			}
+			connection = createConnection(ip, port, anon);
+		} catch (final UnknownHostException e) {
+			System.err.println("Unknown host " + ip);
+			return;
 		} catch (final IOException e) {
 			System.err.println("Cannot reach the server " + ipStr + ":" + port);
 			return;
@@ -135,10 +117,7 @@ public class JythonRemoteClient {
 			reader = new ConsoleReader(System.in, out, bindings);
 		} catch (final IOException e) {
 			System.err.println("Cannot start the console");
-			try {
-				connection.close();
-			} catch (final IOException ex) {
-			}
+			closeConnection(connection);
 			return;
 		}
 
@@ -153,10 +132,7 @@ public class JythonRemoteClient {
 			return;
 		} catch (final IOException e1) {
 			System.err.println("Cannot reach the server " + ipStr + ":" + port);
-			try {
-				connection.close();
-			} catch (final IOException e) {
-			}
+			closeConnection(connection);
 			return;
 		}
 
@@ -164,22 +140,10 @@ public class JythonRemoteClient {
 
 		ConnectionResponse connMsg;
 		try {
-			while (true) {
-				final JythonRemoteMessage message = msgReader.nextMessage();
-				final MessageType msgType = message.getMsgType();
-				if (msgType != MessageType.ConnectionResponse) {
-					continue;
-				}
-
-				connMsg = (ConnectionResponse) message;
-				break;
-			}
+			connMsg = (ConnectionResponse) readMessage(msgReader, MessageType.ConnectionResponse);
 		} catch (final IOException e) {
 			System.err.println("Cannot reach the server " + ipStr + ":" + port);
-			try {
-				connection.close();
-			} catch (final IOException ex) {
-			}
+			closeConnection(connection);
 			return;
 		}
 
@@ -201,10 +165,7 @@ public class JythonRemoteClient {
 				break;
 			default:
 				System.err.println("Unexpected prompt type: " + prompt);
-				try {
-					connection.close();
-				} catch (final IOException e) {
-				}
+				closeConnection(connection);
 				return;
 			}
 
@@ -213,10 +174,7 @@ public class JythonRemoteClient {
 				line = reader.readLine(promptStr);
 			} catch (final IOException e) {
 				System.err.println("Cannot read the console");
-				try {
-					connection.close();
-				} catch (final IOException ex) {
-				}
+				closeConnection(connection);
 				return;
 			}
 
@@ -227,42 +185,66 @@ public class JythonRemoteClient {
 				outputStream.flush();
 			} catch (final IOException e) {
 				System.err.println("Cannot reach the server " + ipStr + ":" + port);
-				try {
-					connection.close();
-				} catch (final IOException ex) {
-				}
+				closeConnection(connection);
 				return;
 			}
 
 			try {
-				JythonRemoteMessage message;
-				MessageType msgType;
-				do {
-					message = msgReader.nextMessage();
-					msgType = message.getMsgType();
-				} while (msgType != MessageType.EvaluationResponse);
-
-				final EvaluationResponse castedMsg = (EvaluationResponse) message;
+				final EvaluationResponse castedMsg = (EvaluationResponse) readMessage(msgReader, MessageType.EvaluationResponse);
 				final String response = castedMsg.getResponse();
 				System.out.print(response);
 				prompt = castedMsg.getPrompt();
 			} catch (final IOException e) {
 				System.err.println("Cannot reach the server " + ipStr + ":" + port);
-				try {
-					connection.close();
-				} catch (final IOException ex) {
-				}
+				closeConnection(connection);
 				return;
 			}
+		}
+	}
+
+	private static JythonRemoteMessage readMessage(final JythonRemoteMessageReader msgReader, final MessageType type) throws IOException {
+		while (true) {
+			final JythonRemoteMessage message = msgReader.nextMessage();
+			final MessageType msgType = message.getMsgType();
+			if (msgType == type) {
+				return message;
+			}
+		}
+	}
+
+	private static Socket createConnection(final String ip, final int port, final boolean anon) throws UnknownHostException, IOException {
+		final Socket connection;
+		final SocketFactory socketFactory = SSLSocketFactory.getDefault();
+		final InetAddress addr;
+		if (ip != null) {
+			addr = InetAddress.getByName(ip);
+		} else {
+			addr = InetAddress.getLocalHost();
+		}
+
+		connection = socketFactory.createSocket(addr, port);
+
+		if (anon) {
+			System.out.println("Warining: No keystore is provided. Anonymous cipher suites are enabled, they are vulnerable to \"man-in-the-middle\" attacks.");
+			final SSLSocket sslConn = (SSLSocket) connection;
+			final String[] supportedCipherSuites = sslConn.getSupportedCipherSuites();
+			sslConn.setEnabledCipherSuites(supportedCipherSuites);
+		}
+		return connection;
+	}
+
+	private static void closeConnection(final Socket connection) {
+		try {
+			connection.close();
+		} catch (final IOException ex) {
 		}
 	}
 
 	/**
 	 * Return the JLine bindings file.
 	 * 
-	 * This handles loading the user's custom keybindings (normally JLine does)
-	 * so it can fallback to Jython's (which disable tab completition) when the
-	 * user's are not available.
+	 * This handles loading the user's custom keybindings (normally JLine does) 
+	 * so it can fallback to Jython's (which disable tab completition) when the user's are not available.
 	 * 
 	 * @return an InputStream of the JLine bindings file.
 	 */
