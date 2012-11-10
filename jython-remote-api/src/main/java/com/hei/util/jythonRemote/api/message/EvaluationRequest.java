@@ -7,13 +7,10 @@ public class EvaluationRequest extends JythonRemoteMessage {
 
 	public static final int MSG_VERSION = 0;
 
-	static final MessageDeserializer DESERIALIZER = new MessageDeserializer(
-			MSG_VERSION) {
+	static final MessageDeserializer DESERIALIZER = new MessageDeserializer(MSG_VERSION) {
 
 		@Override
-		protected DeserializationResult derserialize(final byte[] bytes,
-				final int offset, final int length)
-				throws DeserializationException {
+		protected DeserializationResult derserialize(final byte[] bytes, final int offset, final int length) throws DeserializationException {
 			try {
 				final ByteBuffer msg = ByteBuffer.wrap(bytes, offset, length);
 
@@ -34,26 +31,26 @@ public class EvaluationRequest extends JythonRemoteMessage {
 		}
 	};
 
-	private final String _line;
+	private final String line;
 
 	public EvaluationRequest(final String line) {
 		super(MessageType.EvaluationRequest, MSG_VERSION);
-		_line = line;
+		this.line = line;
 	}
 
 	public String getLine() {
-		return _line;
+		return line;
 	}
 
 	@Override
 	protected byte[] serializeContent() {
-		final byte[] line = _line.getBytes();
-		final int capacity = 4 + line.length;
+		final byte[] lineBytes = line.getBytes();
+		final int capacity = 4 + lineBytes.length;
 
 		final ByteBuffer msg = ByteBuffer.allocate(capacity);
 
-		msg.putInt(line.length);
-		msg.put(line);
+		msg.putInt(lineBytes.length);
+		msg.put(lineBytes);
 
 		final byte[] bytes = msg.array();
 		return bytes;

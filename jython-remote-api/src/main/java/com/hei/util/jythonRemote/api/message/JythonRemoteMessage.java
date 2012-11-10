@@ -14,35 +14,29 @@ public abstract class JythonRemoteMessage {
 
 	static {
 		DESERIALIZERS = new HashMap<JythonRemoteMessage.MessageType, JythonRemoteMessage.MessageDeserializer>();
-		DESERIALIZERS.put(MessageType.ConnectionResponse,
-				ConnectionResponse.DESERIALIZER);
-		DESERIALIZERS
-				.put(MessageType.EvaluationRequest, EvaluationRequest.DESERIALIZER);
-		DESERIALIZERS.put(MessageType.EvaluationResponse,
-				EvaluationResponse.DESERIALIZER);
+		DESERIALIZERS.put(MessageType.ConnectionResponse, ConnectionResponse.DESERIALIZER);
+		DESERIALIZERS.put(MessageType.EvaluationRequest, EvaluationRequest.DESERIALIZER);
+		DESERIALIZERS.put(MessageType.EvaluationResponse, EvaluationResponse.DESERIALIZER);
+		DESERIALIZERS.put(MessageType.Authentication, AuthMessage.DESERIALIZER);
 	}
 
-	public static DeserializationResult deserialize(final byte[] msg)
-			throws DeserializationException {
+	public static DeserializationResult deserialize(final byte[] msg) throws DeserializationException {
 		return deserialize(msg, 0, msg.length);
 	}
 
-	public static DeserializationResult deserialize(final byte[] msg,
-			final int offset, final int length) throws DeserializationException {
+	public static DeserializationResult deserialize(final byte[] msg, final int offset, final int length) throws DeserializationException {
 		final ByteBuffer buffer = ByteBuffer.wrap(msg, offset, length);
 
 		final byte[] header = new byte[HEADER.length];
 		try {
 			buffer.get(header);
 		} catch (final BufferUnderflowException e) {
-			throw new DeserializationException(
-					"Not header, not a JythonRemote message", e);
+			throw new DeserializationException("Not header, not a JythonRemote message", e);
 		}
 
 		final boolean isJythonRemoteMessage = Arrays.equals(HEADER, header);
 		if (!isJythonRemoteMessage) {
-			throw new DeserializationException(
-					"Invalid header, not a JythonRemote message");
+			throw new DeserializationException("Invalid header, not a JythonRemote message");
 		}
 
 		final int msgTypeOrd;
@@ -53,16 +47,14 @@ public abstract class JythonRemoteMessage {
 		}
 		final MessageType[] allTypes = MessageType.values();
 		if (msgTypeOrd >= allTypes.length) {
-			throw new DeserializationException("No message type for ID="
-					+ msgTypeOrd);
+			throw new DeserializationException("No message type for ID=" + msgTypeOrd);
 		}
 
 		final MessageType messageType = allTypes[msgTypeOrd];
 
 		final MessageDeserializer deserializer = DESERIALIZERS.get(messageType);
 		if (deserializer == null) {
-			throw new DeserializationException("No deserializer for "
-					+ messageType);
+			throw new DeserializationException("No deserializer for " + messageType);
 		}
 
 		final int targetVersion = deserializer.getMsgVersion();
@@ -74,35 +66,31 @@ public abstract class JythonRemoteMessage {
 		}
 
 		if (targetVersion != version) {
-			throw new DeserializationException("Incompatible version "
-					+ version + " of " + messageType);
+			throw new DeserializationException("Incompatible version " + version + " of " + messageType);
 		}
 
 		final int headerOffset = HEADER.length + 8;
 		final int contentLen = length - headerOffset;
-		final DeserializationResult result = deserializer.derserialize(msg,
-				headerOffset, contentLen);
+		final DeserializationResult result = deserializer.derserialize(msg, headerOffset, contentLen);
 		return result;
 	}
 
-	protected final MessageType _msgType;
-	protected final int _msgVersion;
+	protected final MessageType msgType;
+	protected final int msgVersion;
 
-	protected JythonRemoteMessage(final MessageType msgType,
-			final int msgVersion) {
-		_msgType = msgType;
-		_msgVersion = msgVersion;
+	protected JythonRemoteMessage(final MessageType msgType, final int msgVersion) {
+		this.msgType = msgType;
+		this.msgVersion = msgVersion;
 	}
 
 	public byte[] serialize() {
 		final byte[] content = serializeContent();
-		final ByteBuffer msg = ByteBuffer.allocate(HEADER.length + 8
-				+ content.length);
+		final ByteBuffer msg = ByteBuffer.allocate(HEADER.length + 8 + content.length);
 
 		msg.put(HEADER);
-		final int msgType = _msgType.ordinal();
-		msg.putInt(msgType);
-		msg.putInt(_msgVersion);
+		final int msgTypeId = msgType.ordinal();
+		msg.putInt(msgTypeId);
+		msg.putInt(msgVersion);
 		msg.put(content);
 
 		final byte[] bytes = msg.array();
@@ -112,18 +100,18 @@ public abstract class JythonRemoteMessage {
 	protected abstract byte[] serializeContent();
 
 	public int getMsgVersion() {
-		return _msgVersion;
+		return msgVersion;
 	}
 
 	public MessageType getMsgType() {
-		return _msgType;
+		return msgType;
 	}
 
 	/**
 	 * Do not reorder
 	 */
 	public static enum MessageType {
-		ConnectionResponse, EvaluationRequest, EvaluationResponse
+		ConnectionResponse, EvaluationRequest, EvaluationResponse, Authentication
 	}
 
 	public static class DeserializationException extends IOException {
@@ -141,43 +129,40 @@ public abstract class JythonRemoteMessage {
 			super(throwable);
 		}
 
-		public DeserializationException(final String msg,
-				final Throwable throwable) {
+		public DeserializationException(final String msg, final Throwable throwable) {
 			super(msg, throwable);
 		}
 	}
 
 	protected static abstract class MessageDeserializer {
-		protected final int _msgVersion;
+		protected final int msgVersion;
 
 		protected MessageDeserializer(final int msgVersion) {
-			_msgVersion = msgVersion;
+			this.msgVersion = msgVersion;
 		}
 
-		protected abstract DeserializationResult derserialize(byte[] bytes,
-				int offset, int length) throws DeserializationException;
+		protected abstract DeserializationResult derserialize(byte[] bytes, int offset, int length) throws DeserializationException;
 
 		public int getMsgVersion() {
-			return _msgVersion;
+			return msgVersion;
 		}
 	}
 
 	public static class DeserializationResult {
-		private final JythonRemoteMessage _message;
-		private final byte[] _remaining;
+		private final JythonRemoteMessage message;
+		private final byte[] remaining;
 
-		public DeserializationResult(final JythonRemoteMessage message,
-				final byte[] remaining) {
-			_message = message;
-			_remaining = remaining;
+		public DeserializationResult(final JythonRemoteMessage message, final byte[] remaining) {
+			this.message = message;
+			this.remaining = remaining;
 		}
 
 		public JythonRemoteMessage getMessage() {
-			return _message;
+			return message;
 		}
 
 		public byte[] getRemaining() {
-			return _remaining;
+			return remaining;
 		}
 	}
 }

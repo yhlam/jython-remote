@@ -7,13 +7,10 @@ public class ConnectionResponse extends JythonRemoteMessage {
 
 	private static final int MSG_VERSION = 1;
 
-	static final MessageDeserializer DESERIALIZER = new MessageDeserializer(
-			MSG_VERSION) {
+	static final MessageDeserializer DESERIALIZER = new MessageDeserializer(MSG_VERSION) {
 
 		@Override
-		protected DeserializationResult derserialize(final byte[] bytes,
-				final int offset, final int length)
-				throws DeserializationException {
+		protected DeserializationResult derserialize(final byte[] bytes, final int offset, final int length) throws DeserializationException {
 			try {
 				final ByteBuffer msg = ByteBuffer.wrap(bytes, offset, length);
 
@@ -27,8 +24,7 @@ public class ConnectionResponse extends JythonRemoteMessage {
 				msg.get(platformBytes);
 				final String platform = new String(platformBytes);
 
-				final ConnectionResponse message = new ConnectionResponse(
-						version, platform);
+				final ConnectionResponse message = new ConnectionResponse(version, platform);
 				final int remainingLen = msg.remaining();
 				final byte[] remaining = new byte[remainingLen];
 				msg.get(remaining);
@@ -40,36 +36,36 @@ public class ConnectionResponse extends JythonRemoteMessage {
 		}
 	};
 
-	private final String _version;
-	private final String _platform;
+	private final String version;
+	private final String platform;
 
 	public ConnectionResponse(final String version, final String platform) {
 		super(MessageType.ConnectionResponse, MSG_VERSION);
-		_version = version;
-		_platform = platform;
+		this.version = version;
+		this.platform = platform;
 	}
 
 	public String getVersion() {
-		return _version;
+		return version;
 	}
 
 	public String getPlatform() {
-		return _platform;
+		return platform;
 	}
 
 	@Override
 	protected byte[] serializeContent() {
-		final byte[] version = _version.getBytes();
-		final byte[] platform = _platform.getBytes();
-		final int capacity = 4 + version.length + 4 + platform.length;
+		final byte[] versionBytes = version.getBytes();
+		final byte[] platformBytes = platform.getBytes();
+		final int capacity = 4 + versionBytes.length + 4 + platformBytes.length;
 
 		final ByteBuffer msg = ByteBuffer.allocate(capacity);
 
-		msg.putInt(version.length);
-		msg.put(version);
+		msg.putInt(versionBytes.length);
+		msg.put(versionBytes);
 
-		msg.putInt(platform.length);
-		msg.put(platform);
+		msg.putInt(platformBytes.length);
+		msg.put(platformBytes);
 
 		final byte[] bytes = msg.array();
 		return bytes;

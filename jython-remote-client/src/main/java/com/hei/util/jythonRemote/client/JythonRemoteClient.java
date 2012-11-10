@@ -5,16 +5,8 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.OutputStreamWriter;
-import java.net.InetAddress;
-import java.net.Socket;
 import java.net.UnknownHostException;
-
-import javax.net.SocketFactory;
-import javax.net.ssl.SSLException;
-import javax.net.ssl.SSLSocket;
-import javax.net.ssl.SSLSocketFactory;
 
 import jline.ConsoleReader;
 
@@ -27,16 +19,13 @@ import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.PosixParser;
 
-import com.hei.util.jythonRemote.api.JythonRemoteUtil;
-import com.hei.util.jythonRemote.api.JythonRemoteUtil.Prompt;
-import com.hei.util.jythonRemote.api.message.ConnectionResponse;
-import com.hei.util.jythonRemote.api.message.EvaluationRequest;
-import com.hei.util.jythonRemote.api.message.EvaluationResponse;
-import com.hei.util.jythonRemote.api.message.JythonRemoteMessage;
-import com.hei.util.jythonRemote.api.message.JythonRemoteMessage.MessageType;
-import com.hei.util.jythonRemote.api.message.JythonRemoteMessageReader;
+import com.hei.util.jythonRemote.api.EvaluateResult;
+import com.hei.util.jythonRemote.api.JythonRemoteConstants;
+import com.hei.util.jythonRemote.api.JythonRemoteConstants.Prompt;
 
 public class JythonRemoteClient {
+
+	private static final String EXIT_CMD = "\\exit";
 
 	/**
 	 * @param args
@@ -50,7 +39,7 @@ public class JythonRemoteClient {
 
 		OptionBuilder.withArgName("port");
 		OptionBuilder.hasArg();
-		OptionBuilder.withDescription("Server Port (default: " + JythonRemoteUtil.DEFAULT_PORT + ")");
+		OptionBuilder.withDescription("Server Port (default: " + JythonRemoteConstants.DEFAULT_PORT + ")");
 		OptionBuilder.withLongOpt("port");
 		final Option portOpt = OptionBuilder.create('p');
 
@@ -74,9 +63,9 @@ public class JythonRemoteClient {
 				return;
 			}
 
-			final String host = line.getOptionValue('i');
+			final String host = line.getOptionValue('i', "localhost");
 
-			int port = JythonRemoteUtil.DEFAULT_PORT;
+			int port = JythonRemoteConstants.DEFAULT_PORT;
 			if (line.hasOption('p')) {
 				final String portStr = line.getOptionValue("port");
 				try {
@@ -97,61 +86,41 @@ public class JythonRemoteClient {
 	}
 
 	private static void startClient(final String ip, final int port, final boolean anon) {
-		final String ipStr = ip == null ? "localhost" : ip;
-
-		final Socket connection;
-		try {
-			connection = createConnection(ip, port, anon);
-		} catch (final UnknownHostException e) {
-			System.err.println("Unknown host " + ip);
-			return;
-		} catch (final IOException e) {
-			System.err.println("Cannot reach the server " + ipStr + ":" + port);
-			return;
-		}
-
 		final ConsoleReader reader;
 		try {
 			final OutputStreamWriter out = new OutputStreamWriter(System.out);
 			final InputStream bindings = getBindings();
 			reader = new ConsoleReader(System.in, out, bindings);
 		} catch (final IOException e) {
-			System.err.println("Cannot start the console");
-			closeConnection(connection);
+			System.err.println("Cannot initalize the console");
 			return;
 		}
 
-		final InputStream inputStream;
-		final OutputStream outputStream;
+		final ClientJythonEvaluator jython;
 		try {
-			inputStream = connection.getInputStream();
-			outputStream = connection.getOutputStream();
-		} catch (final SSLException e) {
-			final String errMsg = e.getMessage();
-			System.err.println(errMsg);
+			jython = new ClientJythonEvaluator(ip, port, anon);
+		} catch (final UnknownHostException e) {
+			System.err.println("Unknown host " + ip);
 			return;
-		} catch (final IOException e1) {
-			System.err.println("Cannot reach the server " + ipStr + ":" + port);
-			closeConnection(connection);
-			return;
-		}
-
-		final JythonRemoteMessageReader msgReader = new JythonRemoteMessageReader(inputStream);
-
-		ConnectionResponse connMsg;
-		try {
-			connMsg = (ConnectionResponse) readMessage(msgReader, MessageType.ConnectionResponse);
 		} catch (final IOException e) {
-			System.err.println("Cannot reach the server " + ipStr + ":" + port);
-			closeConnection(connection);
+			System.err.println("Cannot reach the server " + ip + ":" + port);
 			return;
 		}
 
-		final String version = connMsg.getVersion();
-		final String platform = connMsg.getPlatform();
+		final String version = jython.getVersion();
+		final String platform = jython.getPlatform();
 
-		System.out.println("Connected to " + ipStr + ":" + port);
+		System.out.println("Connected to " + ip + ":" + port);
 		System.out.println("Jython " + version + " on " + platform);
+
+		readEvalPrintLoop(reader, jython);
+
+		jython.disconnect();
+	}
+
+	private static void readEvalPrintLoop(final ConsoleReader reader, final ClientJythonEvaluator jython) {
+		final String ip = jython.getIP();
+		final int port = jython.getPort();
 
 		Prompt prompt = Prompt.NewLine;
 		while (true) {
@@ -165,85 +134,37 @@ public class JythonRemoteClient {
 				break;
 			default:
 				System.err.println("Unexpected prompt type: " + prompt);
-				closeConnection(connection);
 				return;
 			}
 
-			final String line;
+			String line;
 			try {
 				line = reader.readLine(promptStr);
 			} catch (final IOException e) {
 				System.err.println("Cannot read the console");
-				closeConnection(connection);
 				return;
 			}
 
-			final EvaluationRequest evaluationRequest = new EvaluationRequest(line);
-			final byte[] submitBytes = evaluationRequest.serialize();
-			try {
-				outputStream.write(submitBytes);
-				outputStream.flush();
-			} catch (final IOException e) {
-				System.err.println("Cannot reach the server " + ipStr + ":" + port);
-				closeConnection(connection);
+			if (EXIT_CMD.equals(line)) {
 				return;
 			}
 
 			try {
-				final EvaluationResponse castedMsg = (EvaluationResponse) readMessage(msgReader, MessageType.EvaluationResponse);
-				final String response = castedMsg.getResponse();
-				System.out.print(response);
-				prompt = castedMsg.getPrompt();
-			} catch (final IOException e) {
-				System.err.println("Cannot reach the server " + ipStr + ":" + port);
-				closeConnection(connection);
+				final EvaluateResult evalResult = jython.evaluate(line);
+				final String result = evalResult.getResult();
+				System.out.print(result);
+				prompt = evalResult.getPrompt();
+			} catch (final RuntimeException e) {
+				System.err.println("Cannot reach the server " + ip + ":" + port);
 				return;
 			}
-		}
-	}
-
-	private static JythonRemoteMessage readMessage(final JythonRemoteMessageReader msgReader, final MessageType type) throws IOException {
-		while (true) {
-			final JythonRemoteMessage message = msgReader.nextMessage();
-			final MessageType msgType = message.getMsgType();
-			if (msgType == type) {
-				return message;
-			}
-		}
-	}
-
-	private static Socket createConnection(final String ip, final int port, final boolean anon) throws UnknownHostException, IOException {
-		final Socket connection;
-		final SocketFactory socketFactory = SSLSocketFactory.getDefault();
-		final InetAddress addr;
-		if (ip != null) {
-			addr = InetAddress.getByName(ip);
-		} else {
-			addr = InetAddress.getLocalHost();
-		}
-
-		connection = socketFactory.createSocket(addr, port);
-
-		if (anon) {
-			System.out.println("Warining: No keystore is provided. Anonymous cipher suites are enabled, they are vulnerable to \"man-in-the-middle\" attacks.");
-			final SSLSocket sslConn = (SSLSocket) connection;
-			final String[] supportedCipherSuites = sslConn.getSupportedCipherSuites();
-			sslConn.setEnabledCipherSuites(supportedCipherSuites);
-		}
-		return connection;
-	}
-
-	private static void closeConnection(final Socket connection) {
-		try {
-			connection.close();
-		} catch (final IOException ex) {
 		}
 	}
 
 	/**
 	 * Return the JLine bindings file.
 	 * 
-	 * This handles loading the user's custom keybindings (normally JLine does) 
+	 * This handles loading the user's custom keybindings (normally JLine does)
 	 * so it can fallback to Jython's (which disable tab completition) when the user's are not available.
 	 * 
 	 * @return an InputStream of the JLine bindings file.

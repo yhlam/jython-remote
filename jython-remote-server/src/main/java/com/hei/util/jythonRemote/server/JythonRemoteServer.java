@@ -1,38 +1,31 @@
 package com.hei.util.jythonRemote.server;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import javax.net.ServerSocketFactory;
 import javax.net.ssl.SSLServerSocketFactory;
 import javax.net.ssl.SSLSocket;
 
 import org.python.core.PyObject;
-import org.python.core.PySystemState;
 import org.python.util.InteractiveConsole;
-import org.python.util.InteractiveInterpreter;
 
-import com.hei.util.jythonRemote.api.JythonRemoteUtil;
-import com.hei.util.jythonRemote.api.JythonRemoteUtil.Prompt;
-import com.hei.util.jythonRemote.api.message.ConnectionResponse;
-import com.hei.util.jythonRemote.api.message.EvaluationRequest;
-import com.hei.util.jythonRemote.api.message.EvaluationResponse;
-import com.hei.util.jythonRemote.api.message.JythonRemoteMessage;
-import com.hei.util.jythonRemote.api.message.JythonRemoteMessage.MessageType;
-import com.hei.util.jythonRemote.api.message.JythonRemoteMessageReader;
+import com.hei.util.jythonRemote.api.JythonRemoteConstants;
 
 public class JythonRemoteServer {
-	private static final String STD_IN = "<stdin>";
+	private static final Logger LOG = Logger.getLogger("JythonRemoteServer");
+
+	public static Logger getLogger() {
+		return LOG;
+	}
+
 	private static JythonRemoteServer SINGLETON = null;
 
-	private final InteractiveInterpreter _jython;
-	private volatile Thread _serverThread;
-	private final Object _runLock;
+	private final ServerJythonEvaluator jython;
+	private volatile Thread serverThread;
 
 	public static JythonRemoteServer singleton() {
 		if (SINGLETON == null) {
@@ -43,13 +36,8 @@ public class JythonRemoteServer {
 	}
 
 	private JythonRemoteServer() {
-		_serverThread = null;
-		_runLock = new Object();
-
-		_jython = new InteractiveInterpreter();
-
-		// Dummy exec in order to speed up response on first command
-		_jython.exec("0");
+		serverThread = null;
+		jython = new ServerJythonEvaluator();
 	}
 
 	public synchronized void startServer() {
@@ -57,11 +45,11 @@ public class JythonRemoteServer {
 	}
 
 	public synchronized void startServer(final PyObject locals) {
-		startServer(locals, JythonRemoteUtil.DEFAULT_PORT);
+		startServer(locals, JythonRemoteConstants.DEFAULT_PORT);
 	}
 
 	public synchronized void startServer(final int port) {
-		startServer(null, JythonRemoteUtil.DEFAULT_PORT);
+		startServer(null, JythonRemoteConstants.DEFAULT_PORT);
 	}
 
 	public synchronized void startServer(final PyObject locals, final int port) {
@@ -71,138 +59,74 @@ public class JythonRemoteServer {
 		}
 
 		if (locals != null) {
-			_jython.setLocals(locals);
+			jython.setLocals(locals);
 		}
 
-		_serverThread = new Thread(new Runnable() {
+		serverThread = new Thread(new Runnable() {
 
 			@Override
 			public void run() {
 				startServerImpl(port);
 			}
 		}, "JythonServer");
-		_serverThread.setDaemon(true);
-		_serverThread.start();
+		serverThread.setDaemon(true);
+		serverThread.start();
 	}
 
 	public boolean isStarted() {
-		return _serverThread != null;
+		return serverThread != null;
 	}
 
 	public synchronized void stopServer() {
-		if (_serverThread != null) {
-			_jython.cleanup();
-			_serverThread.interrupt();
+		if (serverThread != null) {
+			jython.cleanup();
+			serverThread.interrupt();
 		}
 	}
 
 	private void startServerImpl(final int port) {
 		final ServerSocketFactory serverSocketFactory = SSLServerSocketFactory.getDefault();
 
+		final ServerSocket server;
 		try {
-			final ServerSocket server = serverSocketFactory.createServerSocket(port);
-			try {
-				while (true) {
-					final Socket connection = server.accept();
+			server = serverSocketFactory.createServerSocket(port);
+		} catch (final IOException e) {
+			LOG.log(Level.SEVERE, "Failed to create server socket", e);
+			return;
+		}
 
-					// Need to re-check the property in case it is set during runtime
-					final boolean noKeyStore = System.getProperty("javax.net.ssl.keyStore") == null;
-					if (noKeyStore) {
-						final SSLSocket sslConn = (SSLSocket) connection;
-						final String[] supportedCipherSuites = sslConn.getSupportedCipherSuites();
-						sslConn.setEnabledCipherSuites(supportedCipherSuites);
-					}
+		try {
+			while (true) {
+				final Socket connection = server.accept();
 
-					handleConnection(connection);
+				// Need to re-check the property in case it is set during runtime
+				final boolean noKeyStore = System.getProperty("javax.net.ssl.keyStore") == null;
+				if (noKeyStore) {
+					final SSLSocket sslConn = (SSLSocket) connection;
+					final String[] supportedCipherSuites = sslConn.getSupportedCipherSuites();
+					sslConn.setEnabledCipherSuites(supportedCipherSuites);
 				}
-			} catch (final IOException e) {
+
+				handleConnection(connection);
+			}
+		} catch (final IOException e) {
+			try {
 				server.close();
-				e.printStackTrace();
+			} catch (final IOException closeErr) {
+				// Ignore exception for close
 			}
 
-		} catch (final IOException e) {
-			e.printStackTrace();
+			LOG.log(Level.SEVERE, "Failed to accept connection", e);
 		}
+
 	}
 
 	public void handleConnection(final Socket connection) {
-		new Thread(new Runnable() {
-
-			@Override
-			public void run() {
-				final InetAddress clientAddr = connection.getInetAddress();
-				System.out.println("Connected to " + clientAddr.getHostAddress());
-
-				try {
-					final OutputStream outputStream = connection.getOutputStream();
-					final InputStream inputStream = connection.getInputStream();
-					final ByteArrayOutputStream out = new ByteArrayOutputStream();
-
-					final String version = PySystemState.version.toString();
-					final String platform = PySystemState.platform.toString();
-					final ConnectionResponse connectionResponse = new ConnectionResponse(version, platform);
-					sendMessage(outputStream, connectionResponse);
-
-					final JythonRemoteMessageReader msgReader = new JythonRemoteMessageReader(inputStream);
-
-					final StringBuilder codeBuilder = new StringBuilder();
-					while (true) {
-						try {
-							JythonRemoteMessage message;
-							MessageType type;
-							do {
-								message = msgReader.nextMessage();
-								type = message.getMsgType();
-							} while (type != MessageType.EvaluationRequest);
-
-							final EvaluationRequest cmdMsg = (EvaluationRequest) message;
-							final String line = cmdMsg.getLine();
-
-							final boolean more;
-							synchronized (_runLock) {
-								_jython.setOut(out);
-								_jython.setErr(out);
-
-								if (codeBuilder.length() > 0) {
-									codeBuilder.append("\n");
-								}
-								codeBuilder.append(line);
-
-								final String code = codeBuilder.toString();
-								more = _jython.runsource(code, STD_IN);
-
-								if (!more) {
-									codeBuilder.setLength(0);
-								}
-							}
-
-							final Prompt prompt = more ? Prompt.Continue : Prompt.NewLine;
-
-							final String response = out.toString();
-							out.reset();
-
-							final EvaluationResponse evalResponese = new EvaluationResponse(response, prompt);
-							sendMessage(outputStream, evalResponese);
-						} catch (final IOException e) {
-							break;
-						}
-					}
-
-					inputStream.close();
-					outputStream.close();
-					connection.close();
-				} catch (final IOException e) {
-					e.printStackTrace();
-				}
-			}
-
-		}, "JythonConnection").start();
-	}
-
-	private void sendMessage(final OutputStream outputStream, final JythonRemoteMessage message) throws IOException {
-		final byte[] bytes = message.serialize();
-		outputStream.write(bytes);
-		outputStream.flush();
+		try {
+			new ConnectionHandler(connection, jython);
+		} catch (final IOException e) {
+			LOG.severe("Connection closed");
+		}
 	}
 
 	public static void main(final String[] args) {
@@ -214,12 +138,14 @@ public class JythonRemoteServer {
 			System.out.println("Warining: No keystore is provided. Anonymous cipher suites are enabled, they are vulnerable to \"man-in-the-middle\" attacks. "
 					+ "Please specify the keystore in the javax.net.ssl.keyStore system property");
 		}
-		System.out.println("Please any key to end...");
+
+		System.out.println("Press <enter> to to exit.");
 		try {
 			System.in.read();
 		} catch (final IOException e) {
 			e.printStackTrace();
 		}
+
 		jythonServer.stopServer();
 	}
 
